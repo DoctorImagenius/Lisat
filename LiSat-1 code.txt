@@ -1,0 +1,154 @@
+//Reviever
+#include <ESP32Servo.h>
+#define LASER_MARGIN 100
+Servo servo1;
+Servo servo2;
+int currentAngle = 0;
+int recvPin = 32;
+int threshold = 0;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(recvPin, INPUT);
+  servo1.attach(18);
+  servo2.attach(19);
+  servo1.write(currentAngle);
+  servo2.write(currentAngle);
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    sum += analogRead(recvPin);
+    delay(10);
+  }
+  threshold = sum / 100 + LASER_MARGIN; // take average for laser off and add 100 for laser on
+}
+
+void loop() {
+  threshold = analogRead(recvPin) + LASER_MARGIN; // take reatime threshold
+  if (waitForStartSignal()) {
+    char data = receiveData();
+    int angle = constrain(int(data), 0, 90);
+    Serial.print("Angle Received: ");
+    Serial.println(angle);
+    moveSmooth(currentAngle, angle);
+    currentAngle = angle;
+  }
+}
+
+bool waitForStartSignal() {
+  unsigned long startTime = millis();
+  while (analogRead(recvPin) < threshold) {
+    if (millis() - startTime > 5000) return false; // timeout
+  }
+  // Laser just turned ON, start counting
+  unsigned long onTime = millis();
+  while (analogRead(recvPin) > threshold) {
+    if (millis() - onTime == 40) break;  // laser stayed on for 40ms
+  }
+  unsigned long duration = millis() - onTime;
+  delay(20); // laser off time
+  return (duration == 40); // if ON for 40ms, accept as start signal
+}
+
+char receiveData() {
+  char value = 0;
+  delay(5); // wait 5ms to land in the middle of bit 0
+  for (int i = 0; i < 8; i++) {
+    int val = analogRead(recvPin);
+    if (val > threshold) {
+      value |= (1 << i);
+    }
+    delay(10); // wait for next bit
+  }
+  return value;
+}
+
+void moveSmooth(int fromAngle, int toAngle) {
+  int stepDelay = 15;
+  int step = (fromAngle < toAngle) ? 1 : -1;
+  for (int a = fromAngle; a != toAngle; a += step) {
+    servo1.write(a);
+    servo2.write(a);
+    delay(stepDelay);
+  }
+  servo1.write(toAngle);
+  servo2.write(toAngle);
+}
+
+
+
+
+
+
+
+
+
+
+//Transmitter
+#include <BluetoothSerial.h>
+#include <ESP32Servo.h>
+BluetoothSerial SerialBT;
+String incomingData = "";
+Servo servo1;
+Servo servo2;
+int currentAngle = 0;  // tracks the current angle
+int targetAngle = 0;   // the angle we want to go to
+#define laserPin 2
+
+void setup() {
+  Serial.begin(9600);
+  SerialBT.begin("LiSat-1"); // Bluetooth device name
+  servo1.attach(18);
+  servo2.attach(19);
+  servo1.write(currentAngle);
+  servo2.write(currentAngle);
+  pinMode(laserPin, OUTPUT);
+}
+
+void loop() {
+  while (SerialBT.available()) {
+    char c = SerialBT.read();
+    if (c == '\n' || c == '\r') {
+      if (incomingData.length() > 0) {
+        targetAngle = incomingData.toInt(); // convert to int
+        targetAngle = constrain(targetAngle, 0, 90); // ensure valid range
+        Serial.print("Target angle: ");
+        Serial.println(targetAngle);
+        sendStartSignal();
+        sendData(char(targetAngle));
+        moveSmooth(currentAngle, targetAngle); // move smoothly to new angle
+        currentAngle = targetAngle;            // update current position
+        incomingData = "";
+      }
+    } else {
+      incomingData += c;
+    }
+  }
+}
+
+void moveSmooth(int fromAngle, int toAngle) {
+  int stepDelay = 15; // milliseconds between steps
+  int stepSize = (fromAngle < toAngle) ? 1 : -1;
+  for (int angle = fromAngle; angle != toAngle; angle += stepSize) {
+    servo1.write(angle);
+    servo2.write(angle);
+    delay(stepDelay);
+  }
+  servo1.write(toAngle);
+  servo2.write(toAngle);
+}
+
+void sendStartSignal() {
+  digitalWrite(laserPin, HIGH);
+  delay(40);
+  digitalWrite(laserPin, LOW); 
+  delay(20);
+}
+
+void sendData(char ch) {
+  for (int i = 0; i < 8; i++) {
+    digitalWrite(laserPin, (ch >> i) & 1);
+    delay(10);
+  }
+  digitalWrite(laserPin, LOW);
+}
+
