@@ -54,3 +54,4 @@ This project demonstrates a basic wireless light+bluetooth communication system 
 2. **Upload** `rx_code_arduino` to the Satellite ESP32 (RX).
 3. Connect TX ESP32 to your PC ober bluetooth.
 4. Run the Python ground station software
+5. Use laser as TX and solar as RX in esp32
